@@ -22,10 +22,23 @@ to it, write down what you saw, and move on. That's a real observation about
 your pipeline, not giving up.
 """
 
+import re
 from dataclasses import dataclass
 
 import config
 from ingest import Document
+
+# A first block this short, with no sentence-ending punctuation, is a heading
+# rather than prose. Every one of the 88 campus_life documents opens with one.
+TITLE_MAX_CHARS = 80
+
+# Paragraphs below this merge into their neighbour. The shortest body paragraph
+# in campus_life is 36 characters ("Expect 4 hours a week outside class."), and
+# a chunk that small carries too little signal to embed usefully on its own.
+MIN_BODY_CHARS = 40
+
+_PARAGRAPH_BREAK = re.compile(r"\n\s*\n")
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+")
 
 
 @dataclass
@@ -80,24 +93,141 @@ def fallback_split(
     return chunks
 
 
+def _blocks(text: str) -> list[str]:
+    """Paragraphs, blank-line separated, stripped and with empties dropped."""
+    return [b.strip() for b in _PARAGRAPH_BREAK.split(text.strip()) if b.strip()]
+
+
+def _is_title(block: str) -> bool:
+    """A short opening block with no terminal punctuation is a heading."""
+    return len(block) <= TITLE_MAX_CHARS and not block.rstrip().endswith((".", "!", "?"))
+
+
+def _merge_short(paragraphs: list[str], floor: int) -> list[str]:
+    """
+    Fold paragraphs shorter than `floor` into a neighbour.
+
+    Forward by preference, so a stub heads the thought it introduces; the last
+    paragraph has nothing ahead of it, so it folds backwards instead. This is
+    the guard against the degenerate tail fragment fixed-width windows produce
+    — the 2-character chunk the brief points at on advice_threads.
+    """
+    merged: list[str] = []
+    carry = ""
+    for para in paragraphs:
+        candidate = f"{carry} {para}".strip() if carry else para
+        if len(candidate) < floor:
+            carry = candidate
+            continue
+        merged.append(candidate)
+        carry = ""
+    if carry:
+        if merged:
+            merged[-1] = f"{merged[-1]} {carry}"
+        else:
+            merged.append(carry)
+    return merged
+
+
+def _fit(text: str, budget: int) -> list[str]:
+    """
+    Break `text` to fit `budget`, cutting at sentence ends where possible.
+
+    Nothing in campus_life reaches the budget, so this is a ceiling that does
+    not fire on this corpus. It matters for any document whose paragraphs run
+    longer, and it guarantees that when a cut does happen it lands between
+    sentences rather than mid-word.
+    """
+    if len(text) <= budget:
+        return [text]
+
+    parts: list[str] = []
+    current = ""
+    for sentence in _SENTENCE_BREAK.split(text):
+        candidate = f"{current} {sentence}".strip() if current else sentence
+        if current and len(candidate) > budget:
+            parts.append(current)
+            current = sentence
+        else:
+            current = candidate
+    if current:
+        parts.append(current)
+
+    # A single sentence longer than the budget still has to come apart; do it
+    # at a word boundary rather than mid-word.
+    sized: list[str] = []
+    for part in parts:
+        while len(part) > budget:
+            cut = part.rfind(" ", 0, budget)
+            if cut <= 0:
+                cut = budget
+            sized.append(part[:cut].strip())
+            part = part[cut:].strip()
+        if part:
+            sized.append(part)
+    return sized
+
+
 def split_documents(documents: list[Document]) -> list[Chunk]:
     """
-    Split documents into chunks. ⚠️ REPLACE THE BODY OF THIS IN MILESTONE 3.
+    One chunk per paragraph, with the document's title line prepended.
 
-    Right now it just calls the fallback. That is the plain, generic behaviour
-    the brief is talking about.
+    Why this shape, for this corpus: every campus_life document is a heading
+    plus one to four paragraphs (median two), and those paragraphs are
+    topically distinct — course format, then workload, then advice; dining wait
+    times, then hours and cost. Keeping a whole post as one chunk, which is
+    what an 800-character window did, blends those topics into one embedding
+    that matches every question about the post a little and none of them well.
 
-    When you write your own strategy, set `produced_by` to
-    "chunker.py::split_documents" so your README's Sample Chunks section names
-    the right function. `app.py chunks` prints that string for you.
+    But splitting alone makes things worse, because 26 of the 183 body
+    paragraphs name neither their course nor their building: "Expect 4 hours a
+    week outside class." is indistinguishable from the seven other workload
+    paragraphs shaped exactly like it. Prepending the title line is what makes
+    a paragraph-sized chunk safe to retrieve — it is the difference between a
+    chunk that answers "how many hours is ECON 101" and one that merely looks
+    like it does.
 
-    Things worth thinking about before you write any code:
-      - Are your documents short posts or long guides?
-      - Is the useful information in one sentence, or spread over a paragraph?
-      - Would splitting on paragraph breaks keep more thoughts intact than
-        splitting on a character count?
+    `config.CHUNK_SIZE` acts as a ceiling here rather than a target, and there
+    is no overlap: cuts land on paragraph boundaries, so there is no arbitrary
+    split for an overlap window to repair.
     """
-    return fallback_split(documents)
+    chunks: list[Chunk] = []
+
+    for doc in documents:
+        blocks = _blocks(doc.text)
+        if not blocks:
+            continue
+
+        if len(blocks) > 1 and _is_title(blocks[0]):
+            title, body = blocks[0], blocks[1:]
+        else:
+            title, body = "", blocks
+
+        # Newline rather than a dash: several titles already contain an em-dash
+        # ("CS 340 Databases — assessment"), and chaining another onto it reads
+        # as one run-on sentence.
+        prefix = f"{title}\n" if title else ""
+        budget = max(config.CHUNK_SIZE - len(prefix), 1)
+
+        pieces = [
+            prefix + part
+            for para in _merge_short(body, MIN_BODY_CHARS)
+            for part in _fit(para, budget)
+        ]
+        if not pieces:
+            pieces = [title or doc.text.strip()]
+
+        for index, text in enumerate(pieces):
+            chunks.append(
+                Chunk(
+                    text=text,
+                    source=doc.source,
+                    index=index,
+                    produced_by="chunker.py::split_documents",
+                )
+            )
+
+    return chunks
 
 
 def describe(chunks: list[Chunk]) -> str:

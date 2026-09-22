@@ -86,6 +86,25 @@ split, so the honest target is 5 of 5. The criterion is really a check that my
 chunk size is doing nothing, which is the correct behaviour for documents this
 short, rather than a check that it's splitting well.
 
+> **Revised in Milestone 3:** All 5 sampled chunks identify their own subject —
+> the course, building or topic they describe — without depending on any other
+> chunk, and none is cut mid-sentence. Still 5 of 5.
+>
+> **Why revised:** The original measured the starter's behaviour, not a
+> standard. "No document appearing across two chunks" was true only because an
+> 800-character window never reached my longest 549-character document, and
+> Milestone 3 deliberately replaced that with paragraph-level splitting — 88
+> documents now produce 182 chunks. So the original clause became a description
+> of a design I abandoned rather than a test of the one I built. The property I
+> actually cared about is underneath it and survives the change: a chunk must
+> not be an unattributable fragment. That is what the new version measures, and
+> it can still fail — 26 of my body paragraphs name neither their course nor
+> their building, so if the title-prefix step regresses, this criterion catches
+> it immediately.
+>
+> This is a revision because the original could no longer be *measured* against
+> my pipeline, not because I missed it. The target did not move.
+
 ---
 
 ## 5. Sources are correct, not merely present

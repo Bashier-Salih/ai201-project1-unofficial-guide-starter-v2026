@@ -29,83 +29,125 @@ Bashier Salih - I picked the campus life corpus.
 
 ## Chunking Strategy
 
-**Chunk size:**
-**Overlap:**
+**Chunk size:** 450 characters — a ceiling, not a target. Real chunks average 167.
+**Overlap:** none.
 
-<!-- What about YOUR documents made you pick these numbers? Short posts and
-     long sectioned guides don't want the same chunking, and "800 seemed
-     reasonable" earns nothing. Point at something you noticed when you read
-     the documents in Milestone 1.
+I split on paragraph breaks and prepend each document's title line to every
+chunk. `chunker.py::split_documents`.
 
-     If you changed your mind partway through, say so and say why. That's worth
-     more than pretending you got it right first time.
+**What the starter did first.** `python app.py index` reported:
 
-     Milestone 3. -->
+```
+chunked  88 chunks, 317 characters on average (shortest 178, longest 549), produced by chunker.py::fallback_split
+```
+
+88 documents, 88 chunks. The starter cuts at 800 characters and my longest
+document is 549, so it never split anything — one post was already one chunk.
+That also means the starter's `CHUNK_OVERLAP = 120` was dead code on this
+corpus: nothing split, so nothing overlapped.
+
+**Why I split anyway.** Every document here is a heading plus one to four
+paragraphs — median two, and they cover different things. `course_biol_160.txt`
+has one paragraph on lecture format and assessment, one on weekly hours, one on
+exam pacing. `dining_halden_hall.txt` has one on wait times and food, one on
+hours and price. Keeping all of that in a single embedding gives a vector that
+matches every question about BIOL 160 a little and no question well. Splitting
+per paragraph gives one topic per chunk. That took 88 chunks to 182.
+
+**Why the title line is prepended — this is the part that matters.** I measured
+the paragraphs before writing anything, and 26 of the 183 name neither their
+course nor their building:
+
+```
+Expect 4 hours a week outside class.              (course_econ_101.txt)
+Expect 5 to 6 hours a week outside class.         (course_stat_150.txt)
+Expect 8 to 10 hours a week outside class.        (course_cs_210.txt)
+The bad: the elevator is out roughly one week per semester.   (housing_aldridge_hall.txt)
+```
+
+Split naively, those are unattributable and near-identical to seven siblings
+each. My corpus is built from templates — seven laundry files share whole
+sentences byte for byte, all eight dining follow-ups say "go before 11:45" — so
+a chunk with the building name stripped out is not just less useful, it is
+actively confusable with the wrong building. Prepending the heading is what
+makes a paragraph-sized chunk safe to retrieve.
+
+It works. `retrieve "What is the dryer cost in Morrow House?"` puts the two
+Morrow House chunks at 0.276 and 0.299, with the nearest wrong hall at 0.463 —
+a 0.16 gap between right building and wrong building.
+
+**Why no overlap.** Overlap exists to repair a fact severed by an arbitrary
+cut. My cuts are paragraph boundaries, which are where the author already
+stopped a thought, so there is nothing to repair. The title prefix carries the
+context an overlap window would otherwise have to drag along. I left
+`CHUNK_OVERLAP = 120` in `config.py` because `fallback_split` still reads it
+and I want the original baseline intact for comparison in unit 2.
+
+**What I got wrong on the way.** My first version joined the title to the body
+with an em-dash, which produced `CS 340 Databases — assessment — Start the term
+project…` on the several documents whose headings already contain a dash. It
+read as one run-on sentence. I switched the separator to a newline.
+
+**A cost I accepted.** Splitting makes more chunks compete, and one question got
+slightly worse for it: `"What is the exam format for PHYS 130?"` now ranks the
+hub document's intro paragraph first (0.328), ahead of the actual assessment
+file (0.407). The answer is still in the retrieved set — ranks 2, 3 and 5 all
+carry it — but only because `TOP_K = 5`. With `TOP_K = 1` the paragraph split
+would have made that question worse than the 800-character baseline did.
 
 ## Sample Chunks
 
-<!-- Five chunks, pasted as text. Label each one and name the file it came from
-     AND the function that produced it — the grader checks your code against
-     what you claim here.
+All five produced by `chunker.py::split_documents`, printed by
+`python app.py chunks -n 5`. The first line of each chunk is the prepended
+title line; everything after it is one paragraph of the source document.
 
-     `python app.py chunks -n 5` prints all three for you. Copy them straight
-     across.
-
-     Milestone 3. -->
-
-**Chunk 1** — source: `admin_add_drop_deadline.txt#0` — produced by: `chunker.py::fallback_split`
+**Chunk 1** — source: `admin_add_drop_deadline.txt#0` — produced by: `chunker.py::split_documents`
 
 ```
 On the add/drop deadline
-
 You can add a course through the end of the second week. Dropping is a longer window — through the end of week six — but a drop after week two shows as a W on your transcript. Nothing anywhere on the registrar's site says this plainly, and students find out from each other.
 ```
 
-**Chunk 2** — source: `course_biol_160.txt#0` — produced by: `chunker.py::fallback_split`
+**Chunk 2** — source: `course_cs_340_exams.txt#1` — produced by: `chunker.py::split_documents`
 
 ```
-BIOL 160 Cell Biology
-
-I lived here my sophomore year. Format is lecture three times a week with a weekly lab. Assessment: four unit tests and a cumulative final. Not curved.
-
-Expect 9 to 11 hours a week, the heaviest first-year course by reputation.
-
-The one piece of advice: the unit tests come fast, roughly every three weeks; falling behind once is very hard to recover from.
+CS 340 Databases — assessment
+Start the term project in week three, not week eight; everyone learns this the hard way.
 ```
 
-**Chunk 3** — source: `course_hist_118_workload.txt#0` — produced by: `chunker.py::fallback_split`
+**Chunk 3** — source: `course_phys_130_workload.txt#1` — produced by: `chunker.py::split_documents`
 
 ```
-Workload for HIST 118 Modern World History
-
-People keep asking so: a lot of reading, about 120 pages a week, but no problem sets. That's real time, not optimistic time.
-
+Workload for PHYS 130 Mechanics
 It's front-loaded — the first month is heavier than the rest, partly because you're learning the format.
 ```
 
-**Chunk 4** — source: `dining_pellew_dining_hall_followup.txt#0` — produced by: `chunker.py::fallback_split`
+**Chunk 4** — source: `health_center.txt#0` — produced by: `chunker.py::split_documents`
 
 ```
-Re: Pellew Dining Hall
-
-Adding to what people have said about Pellew Dining Hall. The wait figure of 12 to 18 minutes at peak matches what I've seen. If you're trying to eat between classes, go before 11:45 and it's a different building entirely.
-
-Also worth saying: the furthest hall from anywhere, next to the athletics centre. Nobody tells you this at orientation.
+The health centre
+Walk-in hours are 8am to 11am; everything after that is by appointment and appointments run about a week out. If something is urgent, go at 8am and wait rather than booking.
 ```
 
-**Chunk 5** — source: `housing_innisfree_hall.txt#0` — produced by: `chunker.py::fallback_split`
+**Chunk 5** — source: `housing_morrow_house.txt#2` — produced by: `chunker.py::split_documents`
 
 ```
-Innisfree Hall — what it's actually like
-
-Transferred in last year, so take this with a grain of salt. Built 1991, renovated 2022. Rooms are doubles arranged as pairs sharing one bathroom between two rooms.
-
-The good: the shared-bathroom-between-two-rooms arrangement is the best compromise on campus.
-
-The bad: no air conditioning, which matters for the first three weeks of September.
-
-Laundry costs $1.75 wash, $1.75 dry, app-based. On noise: moderate; the building is L-shaped and the short wing is much quieter.
+Morrow House — what it's actually like
+The bad: known damp problem on the ground floor; two rooms were taken offline in 2024.
 ```
+
+**Reading them against the test.** Could someone answer a question using only
+this, without reading what came before or after? Yes for all five, and chunks 2,
+3 and 5 are the ones that prove the design. Their bodies alone — "Start the term
+project in week three", "It's front-loaded", "The bad: known damp problem" —
+name no course and no building. They would be fragments. The title line is what
+makes them answerable.
+
+Chunk 5 also shows the honest limit. It is 86 characters of body, which is short,
+and it tells you Morrow House has a damp problem without telling you anything
+else about Morrow House. That is the right trade here: a question about damp gets
+a clean match instead of a paragraph about damp buried in a paragraph about
+laundry, noise and construction dates.
 
 ## Sample Answer
 
