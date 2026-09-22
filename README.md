@@ -21,11 +21,26 @@ Bashier Salih - I picked the campus life corpus.
 
 ## What This Does
 
-<!-- Three or four sentences. Which corpus you picked, and the kinds of
-     questions your system answers. Write it for someone who has never seen
-     this repo.
+This is a question-answering system over the `campus_life` corpus: 88 short
+student-written posts about one university's dining halls, residences, courses
+and administrative deadlines — the things people find out from each other
+rather than from an official page. You ask it a specific question and it
+answers from those posts, naming the file it used, so you can go and check.
 
-     Milestone 5. -->
+It handles questions with a definite answer somewhere in the documents: what a
+dryer costs in Morrow House, how many hours a week BIOL 160 takes outside
+class, what the printing quota is, when the add/drop window closes. It does not
+handle questions of taste ("which dining hall is best"), and it is built to
+refuse rather than improvise when the documents don't cover something — ask it
+the capital of Mongolia, or about a course that doesn't exist here, and it says
+it doesn't have enough information instead of guessing.
+
+The hard part of this particular corpus is that it is written from templates.
+Seven residence laundry posts share whole sentences byte for byte, eight dining
+halls are described in the same shape, and each of eight courses has a matching
+workload and exam post. So the real problem is not finding text about laundry —
+it is coming back with the right *building's* laundry. Most of the design
+decisions below exist for that reason.
 
 ## Chunking Strategy
 
@@ -303,18 +318,45 @@ questions sit 0.17 below the cutoff, and all five `OUT_OF_SCOPE` questions sit
 
 ## How I Used AI
 
-<!-- Two specific moments. For each: what you asked for, what came back, and
-     what you changed about it.
+I used Claude throughout this project, including to write code and draft parts
+of this README. Two moments where what came back changed what I did:
 
-     "I asked Claude to write the chunking function from my notes. It ignored
-     the overlap, so I added that myself" is the level of detail we're after.
-     "I used AI to help me code" is not.
+**1. It killed a test question I thought was good.** I had written "What is the
+best time to do laundry in Morrow House?" as one of my five — it names a
+building, names an attribute, and the answer is right there in
+`housing_morrow_house_laundry.txt`. I asked Claude whether it was a good
+question. Instead of answering, it grepped the corpus and came back with the
+seven laundry files side by side: every one of them contains the sentence "Best
+time to do laundry here is Tuesday or Wednesday morning" byte for byte. The
+question would return "Tuesday or Wednesday morning" and pass my `expects`
+check even if retrieval had fetched Aldridge Hall. It could not fail, so it
+measured nothing. I replaced it with dryer cost, where `1.25` appears in
+exactly two files and both are Morrow House. That check — *what would a wrong
+retrieval produce?* — is what I applied to the other four questions, and it's
+also where criterion 5 came from.
 
-     Milestone 5. -->
+**2. It gave me a confident wrong claim, and I committed it before catching
+it.** After I replaced the chunker, Claude reported that the PHYS 130 question
+had regressed: rank 1 now came from `course_phys_130.txt` rather than the
+dedicated `course_phys_130_exams.txt`, which looked like the paragraph split
+burying the right document. It wrote that into the README as a cost I'd
+accepted, with the specific claim that at `TOP_K = 1` the question would have
+been worse than the 800-character baseline. That got committed. It was wrong.
+Reading the chunk instead of its filename, rank 1 is `Assessment: three
+midterms, no final, plus a lab practical. Not curved, but the lowest midterm is
+dropped.` — the full answer, and a better one than the assessment file's own
+top chunk, which only covers the practical's weighting. The whole claim came
+from ranking sources by filename rather than reading what was in them. I
+reversed the commit and rewrote the section.
 
-**1.**
-
-**2.**
+The second one is the lesson I'd keep. The error was plausible, specific,
+internally consistent, and cited real distances — 0.328 and 0.407, both
+accurate. Nothing about it looked like a guess. It was only wrong about the one
+thing neither of the numbers showed, which was what the chunk actually said.
+That is the same failure mode this whole project is built to defend against:
+`GROUNDING_INSTRUCTION` exists because a model will name a source and still not
+be telling you what that source says. I got a live demonstration of it in my
+own README.
 
 <!-- ── Stretch features ─────────────────────────────────────────────────────
      Doing one? Say so here BEFORE you start. A feature this README never
