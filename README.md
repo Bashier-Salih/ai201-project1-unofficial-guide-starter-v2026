@@ -88,12 +88,17 @@ with an em-dash, which produced `CS 340 Databases — assessment — Start the t
 project…` on the several documents whose headings already contain a dash. It
 read as one run-on sentence. I switched the separator to a newline.
 
-**A cost I accepted.** Splitting makes more chunks compete, and one question got
-slightly worse for it: `"What is the exam format for PHYS 130?"` now ranks the
-hub document's intro paragraph first (0.328), ahead of the actual assessment
-file (0.407). The answer is still in the retrieved set — ranks 2, 3 and 5 all
-carry it — but only because `TOP_K = 5`. With `TOP_K = 1` the paragraph split
-would have made that question worse than the 800-character baseline did.
+**A cost I expected and didn't get.** Splitting makes more chunks compete for
+the same question, so I went looking for one that got worse.
+`"What is the exam format for PHYS 130?"` looked like the casualty — it ranks a
+chunk from the hub document first (0.328) rather than the dedicated assessment
+file (0.407). But reading the chunk rather than its filename, rank 1 is
+`Assessment: three midterms, no final, plus a lab practical. Not curved, but the
+lowest midterm is dropped.` That is a better answer to the question than the
+assessment file's own top chunk, which only covers the practical's weighting.
+Ranking by source file would have called this a regression; ranking by content
+says the split got it right. All five test questions retrieve a chunk
+containing their `expects` string at rank 1.
 
 ## Sample Chunks
 
@@ -151,30 +156,150 @@ laundry, noise and construction dates.
 
 ## Sample Answer
 
-<!-- One complete question and answer, pasted as text, with the source line
-     visible. Milestone 4. -->
-
-**Question:**
+**Question:** What is the dryer cost in Morrow House?
 
 **Answer:**
 
 ```
+$ python app.py ask "What is the dryer cost in Morrow House?"
+
+  (best distance 0.276, cutoff 0.5)
+
+The dryer cost in Morrow House is $1.25.
+
+Source: housing_morrow_house.txt (also found in housing_morrow_house_laundry.txt)
+
+Sources retrieved: housing_aldridge_hall_laundry.txt, housing_innisfree_hall_laundry.txt,
+housing_morrow_house.txt, housing_morrow_house_laundry.txt, housing_old_brewhouse_laundry.txt
 ```
 
-**My relevance cutoff:**
+The "sources retrieved" line is the part worth looking at. Three of the five
+chunks sent to the model were the wrong building, carrying $1.50, $1.50 and
+$1.75 as dryer prices. The answer picked $1.25 and named a Morrow House file.
 
-<!-- The number you set in config.py, and how you got there.
+### Is the grounding instruction strict enough?
 
-     You ran five questions your corpus covers and the five in OUT_OF_SCOPE
-     that it clearly doesn't, and wrote down the best distance for each. What
-     did those two groups look like? Where was the gap? Put the actual numbers
-     here — the table below wants all ten rows.
+`GROUNDING_INSTRUCTION` in `generate.py` already says: use only the documents
+provided, admit when they don't cover it, name the file. The question is
+whether that survives a corpus where seven laundry files share sentences byte
+for byte. I wrote six probes designed to break it rather than to pass:
 
-     Milestone 4. -->
+| Probe | Trap | Result |
+|---|---|---|
+| Dryer cost in Morrow House | 3 wrong halls with 3 other prices in context | correct |
+| Dryer cost in Tamsin Court | Tamsin is in-unit; no price exists, siblings have one | refused to invent |
+| Air conditioning in Morrow House | Morrow never mentions it; Innisfree's "no air conditioning" is in context | refused |
+| Wash price in Old Brewhouse | $1.50 is also Morrow's price | cited Old Brewhouse |
+| Cheaper: Morrow or Innisfree | invites blending two halls | both correct |
+| Best laundry time in Fenwick Court | sentence is byte-identical in 7 files | cited Fenwick |
+
+No drift. The instruction is strict enough, and I'm recording that as a tested
+finding rather than an assumption — the interesting result was that the model
+refused twice when refusing was harder than answering.
+
+**Two rules I added anyway.** The air-conditioning probe exposed a small defect:
+the model refused correctly but still printed `(housing_morrow_house.txt)`,
+citing a source for an answer it had not given. So:
+
+```
+- Several documents here describe different buildings, halls or courses in
+  near-identical wording. Only answer from a document that names the specific
+  one the question asks about. A matching sentence about a different building
+  or course is not an answer to this question.
+- When you don't have enough information, say so without naming a file. There
+  is no source to cite for an answer you did not give.
+```
+
+The second fixes the observed defect. The first is preventive — no probe
+triggered a wrong-building answer, but the whole corpus is built from
+templates, so it's the failure most likely to appear on a question I didn't
+think to try. I re-ran all six probes after the change; all still pass, and the
+air-conditioning refusal now names no file.
+
+**My relevance cutoff:** `THRESHOLD = 0.50`, down from the shipped 0.6.
+
+**Top-k:** left at 5. All five test questions retrieve a chunk containing their
+`expects` string at rank 1, so raising it would only add noise; lowering it to 1
+would still pass, but with no margin for a question phrased less precisely.
+
+**The ten required rows.** Five questions my corpus covers, five from
+`OUT_OF_SCOPE`:
 
 | Question | In corpus? | Best distance |
 |---|---|---|
-|  |  |  |
+| How many hours a week outside class does BIOL 160 take? | yes | 0.2650 |
+| How many pages of printing does each student get per semester? | yes | 0.2699 |
+| What is the dryer cost in Morrow House? | yes | 0.2755 |
+| What is the exam format for PHYS 130? | yes | 0.3279 |
+| How much does a meal cost in cash at Kestrel Commons? | yes | 0.3333 |
+| What is the capital of Mongolia? | no | 0.7873 |
+| Who won the 1994 World Cup? | no | 0.8474 |
+| What is the recommended dosage of ibuprofen for a headache? | no | 0.8487 |
+| How do I write a for loop in Rust? | no | 0.8598 |
+| How do I change the oil in a diesel engine? | no | 0.9228 |
+
+Two tight groups, 0.265–0.333 and 0.787–0.923, with a 0.454-wide gap between
+them. By that table alone almost any cutoff from 0.4 to 0.75 works, and I nearly
+stopped there.
+
+**Why I didn't trust that gap.** The five out-of-scope questions are about
+Mongolia, the World Cup, ibuprofen, Rust and diesel engines. Nothing in a
+campus-life corpus is near any of them, so the gap measures the distance between
+my corpus and *unrelated subjects* — not between questions it answers and
+questions it doesn't. The cutoff's real job is the second one. So I wrote
+sixteen more questions in campus vocabulary, half genuinely covered and half
+not, and the picture changed:
+
+| Distance | Covered? | Question |
+|---|---|---|
+| 0.1734 | yes | Is Morrow House laundry expensive? |
+| 0.3041 | yes | What time does the library close? |
+| 0.3789 | yes | Is BIOL 160 a lot of work? |
+| 0.4447 | yes | Which dining hall should I avoid at lunch? |
+| 0.4724 | yes | Is there air conditioning in the dorms? |
+| **0.4955** | **no** | What are the gym opening hours? |
+| 0.5258 | yes | What happens if I withdraw from a course? |
+| 0.5271 | yes | Can I drop a class after the midterm? |
+| **0.5303** | **no** | Does CHEM 101 have a lab? |
+| 0.5368 | yes | How do I print something on campus? |
+| **0.5478** | **no** | Which dorm has the best wifi? |
+| **0.5538** | **no** | How much does a parking permit cost? |
+| **0.5845** | **no** | What is the tuition for out-of-state students? |
+| 0.5911 | yes | Where should I eat late at night? |
+| **0.6021** | **no** | Is there a shuttle to the airport? |
+| **0.6575** | **no** | How do I appeal a parking ticket? |
+
+**There is no clean gap.** Covered and uncovered questions interleave from
+0.4955 to 0.5911. Every cutoff in that band is a trade, not a discovery:
+
+| Cutoff | Refuses covered questions | Accepts uncovered ones |
+|---|---|---|
+| 0.45 | 5 | 0 |
+| **0.50** | **4** | **1** |
+| 0.55 | 1 | 3 |
+| 0.60 (shipped) | 0 | 5 |
+
+**Why 0.50.** The shipped 0.6 lets through five questions the corpus cannot
+answer, and the worst of them is `Does CHEM 101 have a lab?` at 0.5303 — CHEM
+101 does not exist in my corpus, and the nearest chunk is CS 210's assessment
+file. That hands the model material about a different course and asks it a
+confident question. Getting a plausible answer about the wrong course is exactly
+the failure that is hard to notice afterwards, which is the reason for having a
+gate in code rather than asking the model to be careful.
+
+0.50 costs four refusals of questions I do cover, and I looked at each one
+rather than counting them. `Where should I eat late at night?` (0.5911) retrieved
+Halden Hall, which closes at 7:00pm — retrieval had already failed there, so
+refusing is the better outcome. `How do I print something on campus?` (0.5368)
+is only half-covered: the corpus gives the quota, not the procedure. The two
+real losses are `Can I drop a class after the midterm?` (0.5271) and `What
+happens if I withdraw from a course?` (0.5258), both of which have a document
+that answers them directly. I am accepting those two refusals to keep CHEM 101
+out.
+
+Against the graded criteria the margin is comfortable either way: all five test
+questions sit 0.17 below the cutoff, and all five `OUT_OF_SCOPE` questions sit
+0.29 above it.
 
 ## How I Used AI
 

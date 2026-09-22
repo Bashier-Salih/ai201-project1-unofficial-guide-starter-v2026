@@ -279,6 +279,8 @@ Rules:
 - Use only the information in the documents below. Do not use anything you know from elsewhere.
 - If the documents don't cover the question, say you don't have enough information. Do not guess.
 - Name the document your answer came from, using the filename given in each excerpt.
+- Several documents here describe different buildings, halls or courses in near-identical wording. Only answer from a document that names the specific one the question asks about. A matching sentence about a different building or course is not an answer to this question.
+- When you don't have enough information, say so without naming a file. There is no source to cite for an answer you did not give.
 - Be brief. Two or three sentences is usually enough."""
 
 
