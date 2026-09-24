@@ -373,27 +373,163 @@ own README.
 
 ## Run Log — Before
 
-<!-- Your five criteria, three runs each. `python run_eval.py --label before`
-     runs the questions, puts the OUT_OF_SCOPE ones through the gate, and
-     writes it all into results/ for you. Targets come from criteria.md; the
-     verdict column is your call.
-
-     Criterion 3 is measured in one deterministic pass rather than three, so
-     the same number goes in all three run columns. That's correct, not lazy.
-
-     Milestone 1. -->
+Source data: `results/run_2026-09-23_2001_before.md`, produced by
+`run_eval.py::main` — five questions, three runs each, response cache off.
 
 | Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
 |---|---|---|---|---|---|
-| 1. Retrieved chunk contains the answer | 4 of 5 |  |  |  |  |
-| 2. Every answer names a source | 5 of 5 |  |  |  |  |
-| 3. Gate stops out-of-corpus questions | 4 of 5 |  |  |  |  |
-| 4. | | | | | |
-| 5. | | | | | |
+| 1. Retrieved chunk contains the answer | 4 of 5 | 5/5 | 5/5 | 5/5 | MET |
+| 2. Every answer names a source | 5 of 5 | 4/5 | 5/5 | 5/5 | **MISSED** |
+| 3. Gate stops out-of-corpus questions | 4 of 5 | 5/5 | 5/5 | 5/5 | MET |
+| 4. Chunks identify their own subject | 5 of 5 | 5/5 | 5/5 | 5/5 | MET |
+| 5. Sources correct, not merely present | 4 of 5 | 4/5 | 5/5 | 5/5 | MET |
 
-<!-- Underneath, paste the REAL output for each criterion from one of your
-     runs — the actual text your system produced, not a description of it.
-     Name the file and function that produced it. -->
+Criteria 1, 3 and 4 show the same number in all three columns because nothing
+in them depends on the generated text. Retrieval is deterministic, the gate is
+a comparison against a fixed number, and the chunker produces the same 182
+chunks every time. Criteria 2 and 5 read the answer text, and those are the two
+that moved.
+
+**`run_eval.py` reported 15 of 15 passed. That is not what these rows say.**
+Its `scorer.py::judge` asks one question — is the `expects` string somewhere in
+the answer — and none of my five criteria ask that. The gap between its 15/15
+and my rows below is the whole reason this table is a separate piece of work.
+
+---
+
+## Real output — run 1
+
+Every block below is pasted verbatim from
+`results/run_2026-09-23_2001_before.md`, written by `run_eval.py::main`, except
+criterion 4's, which comes from `python app.py chunks -n 5`. The retrieval
+lines are `store.py::search`; the answer text is
+`generate.py::answer_from_chunks`; the gate is `run_eval.py::check_out_of_scope`
+calling `gate.py::check`.
+
+### Criterion 1 — retrieved chunk contains the answer · 5/5 · MET
+
+Judged on the retrieved chunks, not the answer text, which is what the
+criterion says.
+
+````
+### What is the dryer cost in Morrow House? — run 1
+
+- Best distance: 0.2755 (passed the gate)
+- Sources retrieved: housing_aldridge_hall_laundry.txt, housing_innisfree_hall_laundry.txt, housing_morrow_house.txt, housing_morrow_house_laundry.txt, housing_old_brewhouse_laundry.txt
+
+```
+The dryer cost in Morrow House is $1.25. 
+
+Source: housing_morrow_house.txt (and housing_morrow_house_laundry.txt)
+```
+````
+
+````
+### How many hours a week outside class does BIOL 160 take? — run 1
+
+- Best distance: 0.2650 (passed the gate)
+- Sources retrieved: course_biol_160.txt, course_biol_160_workload.txt, course_econ_101_workload.txt, course_stat_150.txt, course_stat_150_workload.txt
+````
+
+`course_biol_160.txt` was retrieved and contains `9 to 11`, so this counts for
+criterion 1 even though the answer below refuses. Retrieval succeeded;
+generation declined to use it.
+
+### Criterion 2 — every answer names a source · 4/5, 5/5, 5/5 · MISSED
+
+The fourteen that named one look like this:
+
+```
+Each student gets $30 of printing per semester, which is roughly 600 black-and-white pages. 
+
+Source: admin_printing_quota.txt
+```
+
+The one that did not, run 1 of BIOL 160:
+
+```
+The documents do not specify how many hours a week outside class BIOL 160 takes; they only state that the course takes 9 to 11 hours a week in total. Therefore, I don't have enough information to answer this question.
+```
+
+Same question, run 2, unchanged inputs:
+
+```
+Based on the provided documents, BIOL 160 Cell Biology takes 9 to 11 hours a week. 
+
+Source: course_biol_160.txt (and course_biol_160_workload.txt)
+```
+
+The target was 5 of 5 and run 1 returned 4, so this is a MISS. The criterion
+says *every* answer, and a target has to hold rather than show up twice out of
+three times.
+
+### Criterion 3 — gate stops out-of-corpus questions · 5/5 · MET
+
+```
+## The relevance gate on out-of-corpus questions
+
+Produced by `run_eval.py::check_out_of_scope`, cutoff 0.5. Refused 5 of 5.
+
+| Out-of-scope question | Best distance | Gate |
+|---|---|---|
+| What is the capital of Mongolia? | 0.787 | refused |
+| How do I change the oil in a diesel engine? | 0.923 | refused |
+| Who won the 1994 World Cup? | 0.847 | refused |
+| What is the recommended dosage of ibuprofen for a headache? | 0.849 | refused |
+| How do I write a for loop in Rust? | 0.860 | refused |
+```
+
+Closest was 0.787 against a 0.50 cutoff. Worth recording that my stated reason
+for choosing 4 of 5 rather than 5 of 5 was wrong: I predicted the ibuprofen
+question would be the risky one because the corpus contains
+`health_center.txt`. It scored 0.849 and matched `money_textbooks.txt` instead.
+The criterion passed, but not for the reason I gave.
+
+### Criterion 4 — chunks identify their own subject · 5/5 · MET
+
+From `python app.py chunks -n 5`:
+
+```
+======================================================================
+Chunk 2  |  source: course_cs_340_exams.txt#1  |  produced by: chunker.py::split_documents
+======================================================================
+CS 340 Databases — assessment
+Start the term project in week three, not week eight; everyone learns this the hard way.
+
+======================================================================
+Chunk 3  |  source: course_phys_130_workload.txt#1  |  produced by: chunker.py::split_documents
+======================================================================
+Workload for PHYS 130 Mechanics
+It's front-loaded — the first month is heavier than the rest, partly because you're learning the format.
+
+======================================================================
+Chunk 4  |  source: health_center.txt#0  |  produced by: chunker.py::split_documents
+======================================================================
+The health centre
+Walk-in hours are 8am to 11am; everything after that is by appointment and appointments run about a week out. If something is urgent, go at 8am and wait rather than booking.
+```
+
+Each names its own course, building or topic on the first line and ends on a
+full sentence. Chunks 2 and 3 are the ones that prove it: `Start the term
+project in week three` and `It's front-loaded` name nothing on their own.
+
+### Criterion 5 — sources correct, not merely present · 4/5, 5/5, 5/5 · MET
+
+````
+### What is the exam format for PHYS 130? — run 1
+
+- Best distance: 0.3279 (passed the gate)
+- Sources retrieved: course_engl_205.txt, course_phys_130.txt, course_phys_130_exams.txt
+
+```
+PHYS 130 has three midterms, no final, plus a lab practical, and the lowest midterm is dropped (course_phys_130.txt and course_phys_130_exams.txt).
+```
+````
+
+ENGL 205 was in the retrieved set and neither named file is it. Both named
+files are PHYS 130 files and both contain the claim. No answer in any run cited
+a wrong building or a wrong course. The 4/5 in run 1 is the BIOL refusal again,
+which named no file at all, so there was no source to be correct.
 
 ## Verdicts
 
