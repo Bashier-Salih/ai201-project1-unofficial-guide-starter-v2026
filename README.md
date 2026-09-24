@@ -544,11 +544,62 @@ which named no file at all, so there was no source to be correct.
 
 | # | Criterion | Verdict | How I decided |
 |---|---|---|---|
-| 1 |  |  |  |
-| 2 |  |  |  |
-| 3 |  |  |  |
-| 4 |  |  |  |
-| 5 |  |  |  |
+| 1 | Retrieved chunks contain the answer (target 4 of 5) | MET | 5/5 in all three runs, including the BIOL 160 run the model refused — `course_biol_160.txt` was retrieved and contains `9 to 11`, so the chunk held the answer even though generation didn't use it. |
+| 2 | Every answer names a source (target 5 of 5) | **MISSED** | Run 1 came back 4/5: the BIOL 160 refusal named no file. The target says *every* answer, and one run failed to hold it — that's a miss even though the other two runs were clean. |
+| 3 | Gate stops out-of-corpus questions (target 4 of 5) | MET | 5/5 in the one deterministic pass, closest distance 0.787 against a 0.50 cutoff — a 0.287 margin, not a near thing. |
+| 4 | Chunks identify their own subject, never fragments (target 5 of 5) | MET | Not just the 5 sampled chunks — I checked all 182 programmatically: 0 without a subject line first, 0 not ending on a sentence boundary. |
+| 5 | Sources are correct, not merely present (target 4 of 5) | MET | Checked all 15 answers, not just one: 14 cited the right file(s), 1 cited none (the same BIOL refusal). Zero wrong-building citations across every run. |
+
+### Arguing the other side
+
+Per the exercise: for each criterion, what's the strongest case for the
+opposite verdict, and does it hold up?
+
+**Criterion 1 (MET) — the case for MISSED.** The BIOL 160 chunk contains `9 to
+11 hours a week`, but the source document never says "outside class" —
+unlike ECON 101, CS 210 and STAT 150, which all do. So the chunk may not
+actually answer the question I asked; it answers a related but different
+question ("total hours for BIOL 160") that happens to share numbers with what
+I wanted. This is a real ambiguity, and I don't think it's fully answerable —
+it's a genuine judgment call about what "contains the answer" means when the
+source itself is ambiguous.
+
+I'm keeping MET, for a narrow reason: criterion 1 is about *retrieval*,
+and the chunk is unambiguously the right chunk to retrieve for this
+question — there is no better chunk anywhere in the corpus. The ambiguity
+lives in the source document, not in what got retrieved. But I don't think
+this is a clean win — it's the closest call of the five, and it's the same
+ambiguity that caused criterion 2's miss, so I'm not double-counting it as
+two independent problems.
+
+**Criterion 2 (MISSED) — the case for MET.** A refusal isn't really "an
+answer" in the sense the criterion means, so maybe naming zero sources on a
+refusal shouldn't count against a criterion about what answers do. This
+didn't hold up: the criterion's own words are "every answer the system
+produces," and a refusal is exactly the kind of output whose source
+attribution matters most, since it's the case where a user would most want
+to check the system's homework. I kept MISSED.
+
+**Criterion 3 (MET) — the case for MISSED.** None worth making. 5/5 against a
+4/5 target, one deterministic pass, closest distance 0.787 against a 0.50
+cutoff — there's no reading of these numbers that gets to a miss.
+
+**Criterion 4 (MET) — the case for MISSED.** The five chunks I originally
+read by eye were hand-picked by `app.py chunks`'s own spread-across-the-corpus
+sampler, not randomly, so a favorable sample doesn't prove the property holds
+generally. This is a fair challenge to the *evidence*, not the result — which
+is why I re-ran the check against all 182 chunks in code rather than trusting
+the 5-sample paste. All 182 pass. MET stands, on stronger evidence than the
+sample alone gave.
+
+**Criterion 5 (MET) — the case for MISSED.** The worst run scored exactly
+4/5, at the floor of the target — one distance worse and this would have
+missed. That's close enough that I re-checked every one of the 15 answers
+for a wrong-building citation rather than trusting the one example I'd
+originally pasted. Zero wrong citations anywhere; the only shortfall is the
+same no-citation refusal counted under criterion 2. MET stands, but the
+margin is thin enough that a sixth run going the other way wouldn't
+surprise me.
 
 ## Diagnoses
 
