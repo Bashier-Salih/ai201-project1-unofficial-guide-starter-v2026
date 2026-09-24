@@ -601,25 +601,89 @@ same no-citation refusal counted under criterion 2. MET stands, but the
 margin is thin enough that a sixth run going the other way wouldn't
 surprise me.
 
-## Diagnoses
+One miss: criterion 2, every answer names a source. Run 1 of "How many hours a
+week outside class does BIOL 160 take?" refused instead of answering.
 
-<!-- For each miss: which stage caused it, and how. The stage alone isn't
-     enough — you need the mechanism.
+**Three candidate causes, before I checked anything** — one per stage, genuinely
+undecided at the time I wrote them:
 
-     Not a diagnosis: "Question 3 didn't work."
-     A diagnosis:     "Question 3 asks about laundry costs. The answer is in
-                       one sentence that got split across two chunks, so
-                       neither chunk on its own contains it."
+1. **Chunking.** Maybe the source document originally had an "outside class"
+   qualifier that landed in a different paragraph than the "9 to 11 hours"
+   figure, so the chunk that got retrieved was missing the modifier that would
+   have let the model answer confidently.
+2. **Retrieval.** Maybe the three runs didn't retrieve the same chunks — an
+   embedding or ranking difference could have swapped in or dropped a chunk
+   between calls, changing what the model saw run to run.
+3. **Generation.** Maybe the chunks were identical every time and the model's
+   own response varied — some randomness or inconsistency in how it applied
+   the "don't guess" rule to a source that's genuinely ambiguous.
 
-     The five stages: loading → chunking → embedding → retrieval → generation.
+**The two-minute check.** `Sources retrieved` for all three runs of this
+question, pulled straight from the run log:
 
-     Look for a pattern. If three misses all ask about numbers, that's one
-     problem, not three.
+```
+run 1: course_biol_160.txt, course_biol_160_workload.txt, course_econ_101_workload.txt, course_stat_150.txt, course_stat_150_workload.txt
+run 2: course_biol_160.txt, course_biol_160_workload.txt, course_econ_101_workload.txt, course_stat_150.txt, course_stat_150_workload.txt
+run 3: course_biol_160.txt, course_biol_160_workload.txt, course_econ_101_workload.txt, course_stat_150.txt, course_stat_150_workload.txt
+```
 
-     Missed nothing? Say so, then say honestly whether your targets were set
-     low, and which one you'd tighten and to what.
+Identical every time. That kills hypothesis 2 — retrieval and the gate are
+both deterministic in this pipeline, so the model saw byte-identical context
+in all three calls.
 
-     Milestone 3. -->
+That leaves 1 vs 3. Hypothesis 1 needs the fact to be missing or split across
+chunks. It isn't: `course_biol_160.txt`'s chunk reads whole and complete,
+`Expect 9 to 11 hours a week, the heaviest first-year course by reputation.`
+— one sentence, one chunk, nothing truncated (the chunker guarantees no
+mid-sentence cuts, which is what criterion 4 verifies). The fact was present
+and intact in every run. That kills hypothesis 1.
+
+**Stage: generation.** With retrieval and chunking ruled out by the check
+above, and the context byte-identical across all three calls, the only place
+left for the difference to come from is the model's own response — and each
+run really is a separate call, since `run_eval.py` runs with the cache off.
+
+**The mechanism, not just the stage.** `course_biol_160.txt`'s workload
+sentence never says "outside class" — it just says "9 to 11 hours a week."
+`GROUNDING_INSTRUCTION` says: *"If the documents don't cover the question, say
+you don't have enough information. Do not guess."* In run 1, the model read
+"outside class" as a qualifier the documents don't supply and refused. In runs
+2 and 3, given the identical text, it treated the figure as answering the
+question anyway and cited the file. Same instruction, same chunks, same
+question, two different calls about how literally to apply "the documents
+don't cover it."
+
+**This is a corpus pattern, not a one-off in BIOL 160.** I checked all eight
+course workload documents for the qualifier my question depended on:
+
+```
+course_biol_160_workload.txt     AMBIGUOUS — no qualifier
+course_cs_210_workload.txt       has qualifier ("outside class")
+course_cs_340_workload.txt       AMBIGUOUS — no qualifier
+course_econ_101_workload.txt     has qualifier ("outside class")
+course_engl_205_workload.txt     AMBIGUOUS — no qualifier
+course_hist_118_workload.txt     AMBIGUOUS — no qualifier
+course_math_220_workload.txt     AMBIGUOUS — no qualifier
+course_phys_130_workload.txt     AMBIGUOUS — no qualifier
+course_stat_150_workload.txt     has qualifier ("outside class")
+```
+
+Six of eight never say "outside class." Only CS 210, ECON 101 and STAT 150 do.
+So this isn't a defect specific to one document — it's how most of the corpus
+was written, and any "hours outside class" question about the other five
+courses would hit the same ambiguity and could produce the same inconsistent
+refusal. It also isn't independent of criterion 1's closest call from
+Milestone 2: that flagged the same ambiguity from the retrieval side, arguing
+the chunk was still the right one to retrieve even though the fact it
+contains doesn't unambiguously answer the question asked. One authoring
+inconsistency in the source documents, landing on two different criteria as
+two different symptoms.
+
+**Not a chunking or retrieval defect.** Nothing to fix in `chunker.py` or
+`store.py` for this one — the pipeline did its job correctly at both stages.
+The fix, if there is one, belongs either in the source wording (out of scope —
+I don't get to rewrite the corpus) or in the grounding instruction's handling
+of a qualifier that's present in some sibling documents and absent in others.
 
 ## The Improvement
 
